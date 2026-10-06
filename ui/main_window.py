@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime
 from PyQt6.QtWidgets import (QMainWindow, QLabel, QTableWidgetItem, 
                              QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QWidget, QMessageBox, QTabWidget, QTableWidget, 
@@ -13,11 +14,12 @@ class MainWindow(QMainWindow):
         
         self.cart_data = [] 
         self.cart_total = 0.0
-        self.selected_customer_id = None # Tracks who is selected in the Debt Viewer
+        self.selected_customer_id = None
         
         self.setWindowTitle(f"flwr - {self.role} Panel")
         self.setGeometry(100, 100, 1200, 800) 
         
+        # FIXED STYLESHEET: Adjusted Header min-height and padding to stop text clipping
         self.setStyleSheet("""
             QMainWindow { background-color: #1a1a1a; font-family: 'Segoe UI', Arial, sans-serif; }
             QTabWidget::pane { border: none; background: #1a1a1a; }
@@ -38,10 +40,12 @@ class MainWindow(QMainWindow):
             QPushButton#secondaryBtn { background-color: #444444; }
             QPushButton#secondaryBtn:hover { background-color: #555555; }
             
-            QTableWidget { background-color: #2b2b2b; color: white; font-size: 14px; border: none; border-radius: 8px; alternate-background-color: #222222; }
+            QTableWidget { background-color: #2b2b2b; color: white; font-size: 14px; border: none; border-radius: 8px; alternate-background-color: #222222; outline: none; }
             QTableWidget::item { padding: 5px; border-bottom: 1px solid #333; }
             QTableWidget::item:selected { background-color: #9b59b6; color: white; }
-            QHeaderView::section { background-color: #9b59b6; color: white; padding: 10px; border: none; font-weight: bold; font-size: 15px; }
+            
+            /* The fix for the chopped off header text */
+            QHeaderView::section { background-color: #9b59b6; color: white; padding: 5px; border: none; font-weight: bold; font-size: 14px; min-height: 35px; }
         """)
 
         self.tabs = QTabWidget()
@@ -58,7 +62,7 @@ class MainWindow(QMainWindow):
         self.tab_dashboard.layout().addWidget(QLabel("Dashboard: Charts go here."))
 
         self.build_storage_management()
-        self.build_debt_viewer() # Adding the debt viewer to admin too
+        self.build_debt_viewer()
 
         self.tab_sales = QWidget()
         self.tab_sales.setLayout(QVBoxLayout())
@@ -90,6 +94,8 @@ class MainWindow(QMainWindow):
         self.cart_table.setHorizontalHeaderLabels(["Item Name", "Quantity", "Unit Price", "Subtotal"])
         self.cart_table.setAlternatingRowColors(True)
         self.cart_table.setShowGrid(False)
+        self.cart_table.verticalHeader().setVisible(False) # Kills the white bar
+        
         header = self.cart_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) 
         main_layout.addWidget(self.cart_table, 2) 
@@ -148,6 +154,8 @@ class MainWindow(QMainWindow):
         self.inventory_table.setHorizontalHeaderLabels(["ID", "Barcode", "Name", "Stock", "Cost (JOD)", "Sell (JOD)"])
         self.inventory_table.setAlternatingRowColors(True)
         self.inventory_table.setShowGrid(False)
+        self.inventory_table.verticalHeader().setVisible(False) # Kills the white bar
+        
         header = self.inventory_table.horizontalHeader()
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) 
         main_layout.addWidget(self.inventory_table, 2)
@@ -209,16 +217,18 @@ class MainWindow(QMainWindow):
         self.debt_customers_table.setHorizontalHeaderLabels(["ID", "Name", "Phone", "Total Debt (JOD)"])
         self.debt_customers_table.setAlternatingRowColors(True)
         self.debt_customers_table.setShowGrid(False)
-        # Make the table select entire rows, not individual cells
+        self.debt_customers_table.verticalHeader().setVisible(False) # Kills the white bar!
+        
         self.debt_customers_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.debt_customers_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.debt_customers_table.setColumnHidden(0, True) # Hide the ID column visually
+        self.debt_customers_table.setColumnHidden(0, True) 
 
         header = self.debt_customers_table.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Stretch name column
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) 
+        # Force the last column to fit perfectly so words aren't eaten
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) 
         main_layout.addWidget(self.debt_customers_table, 1)
 
-        # Connect clicking a row to our loading function
         self.debt_customers_table.itemSelectionChanged.connect(self.on_customer_selected)
 
         # --- RIGHT SIDE: Transaction History & Payment ---
@@ -235,18 +245,22 @@ class MainWindow(QMainWindow):
         self.debt_history_table.setHorizontalHeaderLabels(["Date & Time", "Cashier", "Amount (JOD)"])
         self.debt_history_table.setAlternatingRowColors(True)
         self.debt_history_table.setShowGrid(False)
+        self.debt_history_table.verticalHeader().setVisible(False) # Kills the white bar!
+
         h_header = self.debt_history_table.horizontalHeader()
-        h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) # Stretch Date/Time
+        h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch) 
+        # Ensure the amount column doesn't get chopped
+        h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) 
         right_panel.addWidget(self.debt_history_table)
 
         self.pay_debt_btn = QPushButton("Make Payment")
-        self.pay_debt_btn.setObjectName("checkoutBtn") # Reuse the green styling
-        self.pay_debt_btn.setEnabled(False) # Disabled until a customer is clicked
+        self.pay_debt_btn.setObjectName("checkoutBtn") 
+        self.pay_debt_btn.setEnabled(False) 
         self.pay_debt_btn.clicked.connect(self.make_debt_payment)
         right_panel.addWidget(self.pay_debt_btn)
 
         right_frame.setLayout(right_panel)
-        main_layout.addWidget(right_frame, 2) # Right side is wider to fit date/time
+        main_layout.addWidget(right_frame, 2) 
 
         self.tab_debt.setLayout(main_layout)
         self.load_debt_customers()
@@ -258,7 +272,6 @@ class MainWindow(QMainWindow):
         try:
             conn = sqlite3.connect('store_database.db')
             cursor = conn.cursor()
-            # Only pull customers who actually owe money
             cursor.execute("SELECT id, name, phone_number, total_debt FROM customers WHERE total_debt > 0")
             rows = cursor.fetchall()
             conn.close()
@@ -267,14 +280,10 @@ class MainWindow(QMainWindow):
                 row_pos = self.debt_customers_table.rowCount()
                 self.debt_customers_table.insertRow(row_pos)
                 
-                # ID (Hidden)
                 self.debt_customers_table.setItem(row_pos, 0, QTableWidgetItem(str(row_data[0])))
-                # Name
                 self.debt_customers_table.setItem(row_pos, 1, QTableWidgetItem(str(row_data[1])))
-                # Phone
                 phone = row_data[2] if row_data[2] else "N/A"
                 self.debt_customers_table.setItem(row_pos, 2, QTableWidgetItem(phone))
-                # Total Debt
                 self.debt_customers_table.setItem(row_pos, 3, QTableWidgetItem(f"{row_data[3]:.2f}"))
                 
         except Exception as e:
@@ -285,19 +294,13 @@ class MainWindow(QMainWindow):
         if not selected_rows:
             return
             
-        # Get the row index of the clicked item
         row = selected_rows[0].row()
-        
-        # Grab the hidden ID and the Name from that row
         self.selected_customer_id = self.debt_customers_table.item(row, 0).text()
         customer_name = self.debt_customers_table.item(row, 1).text()
         total_owed = self.debt_customers_table.item(row, 3).text()
 
-        # Update UI Elements
         self.debt_target_label.setText(f"{customer_name}'s History (Owes: {total_owed} JOD)")
-        self.pay_debt_btn.setEnabled(True) # Enable the payment button
-        
-        # Pull their history
+        self.pay_debt_btn.setEnabled(True) 
         self.load_customer_history(self.selected_customer_id)
 
     def load_customer_history(self, customer_id):
@@ -306,7 +309,6 @@ class MainWindow(QMainWindow):
             conn = sqlite3.connect('store_database.db')
             cursor = conn.cursor()
             
-            # The JOIN Query: Matches the sale to the specific worker who rang it up
             cursor.execute("""
                 SELECT sales.timestamp, users.username, sales.total_amount 
                 FROM sales 
@@ -320,7 +322,18 @@ class MainWindow(QMainWindow):
             for row_data in rows:
                 row_pos = self.debt_history_table.rowCount()
                 self.debt_history_table.insertRow(row_pos)
-                self.debt_history_table.setItem(row_pos, 0, QTableWidgetItem(str(row_data[0])))
+                
+                # --- The Date Formatting Fix ---
+                raw_timestamp = row_data[0]
+                try:
+                    # Convert '2026-10-06 11:19:00' into a readable object
+                    dt_obj = datetime.strptime(raw_timestamp, "%Y-%m-%d %H:%M:%S")
+                    # Format to '06 Oct 2026, 11:19 AM'
+                    clean_date = dt_obj.strftime("%d %b %Y, %I:%M %p")
+                except ValueError:
+                    clean_date = raw_timestamp # Fallback just in case
+
+                self.debt_history_table.setItem(row_pos, 0, QTableWidgetItem(clean_date))
                 self.debt_history_table.setItem(row_pos, 1, QTableWidgetItem(str(row_data[1])))
                 self.debt_history_table.setItem(row_pos, 2, QTableWidgetItem(f"{row_data[2]:.2f}"))
 
@@ -331,7 +344,6 @@ class MainWindow(QMainWindow):
         if not self.selected_customer_id:
             return
             
-        # Ask the worker how much is being paid today
         amount, ok = QInputDialog.getDouble(self, "Process Payment", "Enter payment amount (JOD):", 0.00, 0.01, 10000.00, 2)
         
         if ok and amount > 0:
@@ -339,7 +351,6 @@ class MainWindow(QMainWindow):
                 conn = sqlite3.connect('store_database.db')
                 cursor = conn.cursor()
                 
-                # Deduct the payment from the customer's total debt
                 cursor.execute("""
                     UPDATE customers SET total_debt = total_debt - ? WHERE id = ?
                 """, (amount, self.selected_customer_id))
@@ -349,7 +360,6 @@ class MainWindow(QMainWindow):
 
                 self.show_popup("Payment Successful", f"Successfully deducted {amount:.2f} JOD from the account.")
                 
-                # Reset the view and reload the master list so the balance updates
                 self.selected_customer_id = None
                 self.debt_target_label.setText("Select a customer from the list...")
                 self.debt_history_table.setRowCount(0)
@@ -550,7 +560,7 @@ class MainWindow(QMainWindow):
             self.cart_data.clear()
             self.update_total()
             self.load_inventory()
-            self.load_debt_customers() # Refresh the debt list if a new one was added!
+            self.load_debt_customers() 
             
             self.show_popup("Debt Logged", f"Success! {self.cart_total:.2f} JOD has been added to {customer_name}'s tab.")
 
