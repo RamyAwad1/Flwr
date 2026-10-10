@@ -1,12 +1,19 @@
 import sqlite3
 import random
 from datetime import datetime
+
+import matplotlib
+matplotlib.use('QtAgg')
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt, QRect, QPoint, QPropertyAnimation, QEasingCurve
 from PyQt6.QtWidgets import (QMainWindow, QLabel, QTableWidgetItem, 
                              QLineEdit, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QWidget, QMessageBox, QTabWidget, QTableWidget, 
                              QHeaderView, QInputDialog, QFrame, QAbstractItemView,
                              QDialog, QComboBox, QStackedWidget, QGridLayout)
-from PyQt6.QtCore import Qt
 
 class CustomerDialog(QDialog):
     def __init__(self, parent=None):
@@ -120,12 +127,19 @@ class MainWindow(QMainWindow):
         self.selected_customer_id = None
         self.current_storage_category = None
         
-        # Auto-upgrade database for payments and dynamic categories
         self._ensure_payment_table()
         self._ensure_category_system()
         
         self.setWindowTitle(f"flwr - {self.role} Panel")
-        self.setGeometry(100, 100, 1200, 800) 
+        
+        # --- FRAMELESS WINDOW SETUP ---
+        self.old_pos = None
+        self.is_maximized_custom = False
+        self.normal_geometry = QRect(100, 100, 1200, 800)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        self.setGeometry(self.normal_geometry)
+        
+        # self.setWindowIcon(QIcon('./logo.png')) 
         
         self.setStyleSheet("""
             QMainWindow { background-color: #1a1a1a; font-family: 'Segoe UI', Arial, sans-serif; }
@@ -146,6 +160,10 @@ class MainWindow(QMainWindow):
             QPushButton#debtBtn:hover { background-color: #c0392b; }
             QPushButton#secondaryBtn { background-color: #444444; }
             QPushButton#secondaryBtn:hover { background-color: #555555; }
+            QPushButton#titleBtn { background-color: transparent; color: #ffffff; font-size: 16px; font-weight: bold; border: none; padding: 5px 10px; }
+            QPushButton#titleBtn:hover { background-color: #5a5a5a; border-radius: 4px; }
+            QPushButton#closeBtn { background-color: transparent; color: #ffffff; font-size: 16px; font-weight: bold; border: none; padding: 5px 10px; }
+            QPushButton#closeBtn:hover { background-color: #e74c3c; border-radius: 4px; }
             
             QTableWidget { background-color: #2b2b2b; color: white; font-size: 14px; border: none; border-radius: 8px; alternate-background-color: #222222; outline: none; }
             QTableWidget::item { padding: 5px; border-bottom: 1px solid #333; }
@@ -153,13 +171,51 @@ class MainWindow(QMainWindow):
             QHeaderView::section { background-color: #9b59b6; color: white; padding: 5px; border: none; font-weight: bold; font-size: 14px; min-height: 35px; }
         """)
 
+        # --- MASTER LAYOUT ---
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        self.build_title_bar()
+
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.main_layout.addWidget(self.tabs)
 
         if self.role == "Admin":
             self.setup_admin_tabs()
         else:
             self.setup_user_tabs()
+
+    def build_title_bar(self):
+        self.title_bar = QWidget()
+        self.title_bar.setStyleSheet("background-color: #111111;") 
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(15, 8, 10, 8)
+
+        title_label = QLabel(f"✿ flwr - {self.role} Panel")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #9b59b6; border: none;")
+        title_layout.addWidget(title_label)
+        
+        title_layout.addStretch()
+
+        self.min_btn = QPushButton("—")
+        self.min_btn.setObjectName("titleBtn")
+        self.min_btn.clicked.connect(self.showMinimized)
+        title_layout.addWidget(self.min_btn)
+
+        self.max_btn = QPushButton("□")
+        self.max_btn.setObjectName("titleBtn")
+        self.max_btn.clicked.connect(self.toggle_maximize)
+        title_layout.addWidget(self.max_btn)
+
+        self.close_btn = QPushButton("X")
+        self.close_btn.setObjectName("closeBtn")
+        self.close_btn.clicked.connect(self.close)
+        title_layout.addWidget(self.close_btn)
+
+        self.main_layout.addWidget(self.title_bar)
 
     def _ensure_payment_table(self):
         conn = sqlite3.connect('store_database.db')
@@ -174,45 +230,33 @@ class MainWindow(QMainWindow):
     def _ensure_category_system(self):
         conn = sqlite3.connect('store_database.db')
         cursor = conn.cursor()
-        
         cursor.execute("PRAGMA table_info(products)")
         columns = [col[1] for col in cursor.fetchall()]
         if 'category' not in columns:
             cursor.execute("ALTER TABLE products ADD COLUMN category TEXT DEFAULT '📦 Uncategorized'")
-            
         cursor.execute('''CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, color TEXT)''')
-            
         cursor.execute("SELECT COUNT(*) FROM categories")
         if cursor.fetchone()[0] == 0:
             defaults = [
-                ("⚡ Wires & Cables", "#f1c40f"),
-                ("🔧 Tools", "#e67e22"),
-                ("💡 Lighting", "#f39c12"),
-                ("⚙️ Hardware", "#7f8c8d"),
+                ("⚡ Wires & Cables", "#f1c40f"), ("🔧 Tools", "#e67e22"),
+                ("💡 Lighting", "#f39c12"), ("⚙️ Hardware", "#7f8c8d"),
                 ("📦 Uncategorized", "#95a5a6")
             ]
             cursor.executemany("INSERT INTO categories (name, color) VALUES (?, ?)", defaults)
-            
         conn.commit()
         conn.close()
 
     def setup_admin_tabs(self):
-        self.tab_dashboard = QWidget()
-        self.tab_dashboard.setLayout(QVBoxLayout())
-        self.tab_dashboard.layout().addWidget(QLabel("Dashboard: Charts go here."))
-
+        self.build_admin_dashboard()
         self.build_storage_management()
         self.build_debt_viewer()
-
-        self.tab_sales = QWidget()
-        self.tab_sales.setLayout(QVBoxLayout())
-        self.tab_sales.layout().addWidget(QLabel("Sales History goes here."))
+        self.build_sales_history()
 
         self.tabs.addTab(self.tab_dashboard, "Dashboard")
+        self.tabs.addTab(self.tab_sales, "Sales History")
         self.tabs.addTab(self.tab_storage, "Storage")
         self.tabs.addTab(self.tab_debt, "Customer Debt")
-        self.tabs.addTab(self.tab_sales, "Sales History")
 
     def setup_user_tabs(self):
         self.build_cash_register()
@@ -223,7 +267,185 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_debt, "Customer Debt")
         self.tabs.addTab(self.tab_storage, "Storage")
 
-    # --- UI BUILDING FUNCTIONS ---
+    def build_admin_dashboard(self):
+        self.tab_dashboard = QWidget()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+
+        kpi_layout = QHBoxLayout()
+        kpi_layout.setSpacing(20)
+
+        self.kpi_revenue = self.create_kpi_card("Total Revenue", "0.00 JOD", "#2ecc71")
+        self.kpi_debt = self.create_kpi_card("Total Unpaid Debt", "0.00 JOD", "#e74c3c")
+        self.kpi_inventory = self.create_kpi_card("Inventory Value", "0.00 JOD", "#3498db")
+
+        kpi_layout.addWidget(self.kpi_revenue)
+        kpi_layout.addWidget(self.kpi_debt)
+        kpi_layout.addWidget(self.kpi_inventory)
+        main_layout.addLayout(kpi_layout)
+
+        chart_frame = QFrame()
+        chart_frame.setStyleSheet("QFrame { background-color: #222222; border-radius: 12px; padding: 10px; }")
+        chart_layout = QVBoxLayout(chart_frame)
+
+        chart_label = QLabel("Revenue Over Last 7 Days")
+        chart_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #9b59b6; border: none;")
+        chart_layout.addWidget(chart_label)
+
+        self.figure = Figure(figsize=(8, 4), dpi=100)
+        self.figure.patch.set_facecolor('#222222') 
+        self.canvas = FigureCanvas(self.figure)
+        chart_layout.addWidget(self.canvas)
+
+        main_layout.addWidget(chart_frame)
+        self.tab_dashboard.setLayout(main_layout)
+
+        self.load_dashboard_data()
+
+    def create_kpi_card(self, title, value_text, color):
+        card = QFrame()
+        card.setStyleSheet(f"QFrame {{ background-color: #222222; border-radius: 12px; border-top: 4px solid {color}; }}")
+        layout = QVBoxLayout(card)
+        
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet("font-size: 16px; color: #aaaaaa; border: none;")
+        layout.addWidget(lbl_title)
+        
+        lbl_val = QLabel(value_text)
+        lbl_val.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {color}; border: none;")
+        layout.addWidget(lbl_val)
+        
+        card.value_label = lbl_val 
+        return card
+
+    def build_sales_history(self):
+        self.tab_sales = QWidget()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+
+        header_layout = QHBoxLayout()
+        title_label = QLabel("Master Sales Ledger")
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #9b59b6;")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        
+        refresh_btn = QPushButton("Refresh Data")
+        refresh_btn.setObjectName("secondaryBtn")
+        refresh_btn.clicked.connect(self.load_sales_history)
+        header_layout.addWidget(refresh_btn)
+        main_layout.addLayout(header_layout)
+
+        self.sales_table = QTableWidget(0, 5)
+        self.sales_table.setHorizontalHeaderLabels(["ID", "Date & Time", "Cashier", "Customer Type", "Total (JOD)"])
+        self.sales_table.setAlternatingRowColors(True)
+        self.sales_table.setShowGrid(False)
+        self.sales_table.verticalHeader().setVisible(False) 
+
+        header = self.sales_table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) 
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch) 
+        main_layout.addWidget(self.sales_table)
+
+        self.tab_sales.setLayout(main_layout)
+        self.load_sales_history()
+
+    def load_dashboard_data(self):
+        try:
+            conn = sqlite3.connect('store_database.db')
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT SUM(total_amount) FROM sales")
+            rev = cursor.fetchone()[0] or 0.0
+            self.kpi_revenue.value_label.setText(f"{rev:,.2f} JOD")
+
+            cursor.execute("SELECT SUM(total_debt) FROM customers")
+            debt = cursor.fetchone()[0] or 0.0
+            self.kpi_debt.value_label.setText(f"{debt:,.2f} JOD")
+
+            cursor.execute("SELECT SUM(quantity_in_stock * cost_price) FROM products")
+            inv = cursor.fetchone()[0] or 0.0
+            self.kpi_inventory.value_label.setText(f"{inv:,.2f} JOD")
+
+            cursor.execute("""
+                SELECT date(timestamp) as sale_date, SUM(total_amount) 
+                FROM sales 
+                GROUP BY sale_date 
+                ORDER BY sale_date DESC 
+                LIMIT 7
+            """)
+            data = cursor.fetchall()
+            conn.close()
+
+            data.reverse()
+            dates = [row[0] for row in data]
+            amounts = [row[1] for row in data]
+
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.set_facecolor('#222222')
+            
+            ax.tick_params(colors='white')
+            for spine in ax.spines.values():
+                spine.set_color('#444444')
+
+            if dates:
+                ax.bar(dates, amounts, color='#9b59b6', width=0.5)
+                ax.set_ylabel('Revenue (JOD)', color='white')
+            else:
+                ax.text(0.5, 0.5, 'No sales data available yet.', 
+                        color='#aaaaaa', ha='center', va='center', fontsize=12)
+                ax.set_xticks([])
+                ax.set_yticks([])
+
+            self.figure.tight_layout()
+            self.canvas.draw()
+        except Exception as e:
+            print(f"Dashboard Error: {e}")
+
+    def load_sales_history(self):
+        self.sales_table.setRowCount(0)
+        try:
+            conn = sqlite3.connect('store_database.db')
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT sales.id, sales.timestamp, users.username, customers.name, sales.total_amount
+                FROM sales
+                LEFT JOIN users ON sales.user_id = users.id
+                LEFT JOIN customers ON sales.customer_id = customers.id
+                ORDER BY sales.timestamp DESC
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+
+            for row_data in rows:
+                row_pos = self.sales_table.rowCount()
+                self.sales_table.insertRow(row_pos)
+                
+                raw_timestamp = row_data[1]
+                try:
+                    dt_obj = datetime.strptime(raw_timestamp, "%Y-%m-%d %H:%M:%S")
+                    clean_date = dt_obj.strftime("%d %b %Y, %I:%M %p")
+                except ValueError:
+                    clean_date = raw_timestamp 
+
+                customer_type = row_data[3] if row_data[3] else "Walk-in (Cash)"
+
+                self.sales_table.setItem(row_pos, 0, QTableWidgetItem(str(row_data[0])))
+                self.sales_table.setItem(row_pos, 1, QTableWidgetItem(clean_date))
+                self.sales_table.setItem(row_pos, 2, QTableWidgetItem(str(row_data[2])))
+                
+                cust_item = QTableWidgetItem(customer_type)
+                if not row_data[3]:
+                    cust_item.setForeground(Qt.GlobalColor.green)
+                else:
+                    cust_item.setForeground(Qt.GlobalColor.red)
+                    
+                self.sales_table.setItem(row_pos, 3, cust_item)
+                self.sales_table.setItem(row_pos, 4, QTableWidgetItem(f"{row_data[4]:.2f}"))
+        except Exception as e:
+            pass
 
     def build_cash_register(self):
         self.tab_register = QWidget()
@@ -291,16 +513,13 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
         
-        # --- LEFT SIDE: The Stacked Interface (Categories -> Table) ---
         self.storage_stack = QStackedWidget()
         main_layout.addWidget(self.storage_stack, 2)
 
-        # PAGE 1: Category Grid
         self.page_categories = QWidget()
         self.category_grid_layout = QGridLayout(self.page_categories)
         self.category_grid_layout.setSpacing(20)
         
-        # PAGE 2: The Specific Inventory Table
         self.page_inventory = QWidget()
         inv_layout = QVBoxLayout(self.page_inventory)
         inv_layout.setContentsMargins(0,0,0,0)
@@ -331,7 +550,6 @@ class MainWindow(QMainWindow):
         self.storage_stack.addWidget(self.page_categories)
         self.storage_stack.addWidget(self.page_inventory)
         
-        # --- RIGHT SIDE: Add New Product Form ---
         right_frame = QFrame()
         right_frame.setStyleSheet("QFrame { background-color: #222222; border-radius: 12px; padding: 10px; }")
         right_panel = QVBoxLayout()
@@ -379,8 +597,6 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(right_frame, 1)
         
         self.tab_storage.setLayout(main_layout)
-        
-        # Load the dynamic UI
         self.load_categories_ui()
 
     def build_debt_viewer(self):
@@ -403,7 +619,6 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) 
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) 
         main_layout.addWidget(self.debt_customers_table, 1)
-
         self.debt_customers_table.itemSelectionChanged.connect(self.on_customer_selected)
 
         right_frame = QFrame()
@@ -438,8 +653,6 @@ class MainWindow(QMainWindow):
         self.tab_debt.setLayout(main_layout)
         self.load_debt_customers()
 
-    # --- DYNAMIC CATEGORY LOGIC ---
-    
     def clear_layout(self, layout):
         while layout.count():
             child = layout.takeAt(0)
@@ -449,7 +662,6 @@ class MainWindow(QMainWindow):
     def load_categories_ui(self):
         self.clear_layout(self.category_grid_layout)
         self.prod_category.clear()
-        
         try:
             conn = sqlite3.connect('store_database.db')
             cursor = conn.cursor()
@@ -460,24 +672,19 @@ class MainWindow(QMainWindow):
             row, col = 0, 0
             for cat_name, color in categories:
                 self.prod_category.addItem(cat_name)
-                
                 btn = QPushButton(cat_name)
                 btn.setStyleSheet(f"""
-                    QPushButton {{
-                        background-color: #222222; color: white; border: 2px solid {color};
-                        border-radius: 12px; font-size: 22px; font-weight: bold; padding: 40px;
-                    }}
+                    QPushButton {{ background-color: #222222; color: white; border: 2px solid {color};
+                                  border-radius: 12px; font-size: 22px; font-weight: bold; padding: 40px; }}
                     QPushButton:hover {{ background-color: {color}; color: #111111; }}
                 """)
                 btn.clicked.connect(lambda checked, c=cat_name: self.open_storage_category(c))
                 self.category_grid_layout.addWidget(btn, row, col)
-                
                 col += 1
-                if col > 1: # 2 columns wide
+                if col > 1:
                     col = 0
                     row += 1
 
-            # NEW: Add Category Button
             add_btn = QPushButton("➕ Add Category")
             add_btn.setStyleSheet("""
                 QPushButton { background-color: #2b2b2b; color: #9b59b6; border: 2px dashed #9b59b6;
@@ -492,7 +699,6 @@ class MainWindow(QMainWindow):
                 col = 0
                 row += 1
 
-            # NEW: Remove Category Button
             rem_btn = QPushButton("🗑️ Remove Category")
             rem_btn.setStyleSheet("""
                 QPushButton { background-color: #2b2b2b; color: #e74c3c; border: 2px dashed #e74c3c;
@@ -501,7 +707,6 @@ class MainWindow(QMainWindow):
             """)
             rem_btn.clicked.connect(self.prompt_remove_category)
             self.category_grid_layout.addWidget(rem_btn, row, col)
-            
         except Exception as e:
             pass
 
@@ -511,7 +716,6 @@ class MainWindow(QMainWindow):
             name = name.strip()
             colors = ["#1abc9c", "#3498db", "#9b59b6", "#e74c3c", "#34495e", "#2ecc71", "#e67e22"]
             color = random.choice(colors)
-            
             try:
                 conn = sqlite3.connect('store_database.db')
                 cursor = conn.cursor()
@@ -526,8 +730,6 @@ class MainWindow(QMainWindow):
         try:
             conn = sqlite3.connect('store_database.db')
             cursor = conn.cursor()
-            
-            # Prevent deletion of the default Uncategorized bucket
             cursor.execute("SELECT name FROM categories WHERE name != '📦 Uncategorized' ORDER BY name")
             categories = [row[0] for row in cursor.fetchall()]
             conn.close()
@@ -538,32 +740,24 @@ class MainWindow(QMainWindow):
 
             category_to_remove, ok = QInputDialog.getItem(
                 self, "Remove Category", 
-                "Select a category to delete:\n(Any products inside will be safely moved to '📦 Uncategorized')", 
+                "Select a category to delete:\n(Products will be moved to '📦 Uncategorized')", 
                 categories, 0, False
             )
 
             if ok and category_to_remove:
-                # Add an extra layer of protection
                 reply = QMessageBox.question(
                     self, 'Confirm Deletion',
-                    f"Are you sure you want to permanently delete '{category_to_remove}'?\n\nAny products inside will be safely moved to '📦 Uncategorized'.",
+                    f"Permanently delete '{category_to_remove}'?\nProducts will be moved to '📦 Uncategorized'.",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
                     QMessageBox.StandardButton.No
                 )
-
                 if reply == QMessageBox.StandardButton.Yes:
                     conn = sqlite3.connect('store_database.db')
                     cursor = conn.cursor()
-                    
-                    # 1. Safely move orphaned products
                     cursor.execute("UPDATE products SET category = '📦 Uncategorized' WHERE category = ?", (category_to_remove,))
-                    
-                    # 2. Delete the category
                     cursor.execute("DELETE FROM categories WHERE name = ?", (category_to_remove,))
-                    
                     conn.commit()
                     conn.close()
-                    
                     self.show_popup("Success", f"Category '{category_to_remove}' has been removed.")
                     self.load_categories_ui() 
         except Exception as e:
@@ -575,7 +769,6 @@ class MainWindow(QMainWindow):
         self.storage_stack.setCurrentIndex(1)
         self.load_inventory()
 
-    # --- DEBT VIEWER LOGIC ---
     def load_debt_customers(self):
         self.debt_customers_table.setRowCount(0)
         try:
@@ -588,7 +781,6 @@ class MainWindow(QMainWindow):
             for row_data in rows:
                 row_pos = self.debt_customers_table.rowCount()
                 self.debt_customers_table.insertRow(row_pos)
-                
                 self.debt_customers_table.setItem(row_pos, 0, QTableWidgetItem(str(row_data[0])))
                 self.debt_customers_table.setItem(row_pos, 1, QTableWidgetItem(str(row_data[1])))
                 phone = row_data[2] if row_data[2] else "N/A"
@@ -625,27 +817,23 @@ class MainWindow(QMainWindow):
                 WHERE customer_id = ?
                 ORDER BY timestamp DESC
             """, (customer_id, customer_id))
-            
             rows = cursor.fetchall()
             conn.close()
 
             for row_data in rows:
                 row_pos = self.debt_history_table.rowCount()
                 self.debt_history_table.insertRow(row_pos)
-                
                 raw_timestamp = row_data[0]
                 try:
                     dt_obj = datetime.strptime(raw_timestamp, "%Y-%m-%d %H:%M:%S")
                     clean_date = dt_obj.strftime("%d %b %Y, %I:%M %p")
                 except ValueError:
                     clean_date = raw_timestamp 
-
                 self.debt_history_table.setItem(row_pos, 0, QTableWidgetItem(clean_date))
                 
                 type_item = QTableWidgetItem(str(row_data[1]))
                 if row_data[1] == 'Payment':
                     type_item.setForeground(Qt.GlobalColor.green)
-                    
                 self.debt_history_table.setItem(row_pos, 1, type_item)
                 self.debt_history_table.setItem(row_pos, 2, QTableWidgetItem(str(row_data[2])))
                 self.debt_history_table.setItem(row_pos, 3, QTableWidgetItem(f"{row_data[3]:.2f}"))
@@ -654,9 +842,7 @@ class MainWindow(QMainWindow):
 
     def make_debt_payment(self):
         if not self.selected_customer_id: return
-            
         amount, ok = QInputDialog.getDouble(self, "Process Payment", "Enter payment amount (JOD):", 0.00, 0.01, 10000.00, 2)
-        
         if ok and amount > 0:
             try:
                 conn = sqlite3.connect('store_database.db')
@@ -675,14 +861,15 @@ class MainWindow(QMainWindow):
                 self.debt_history_table.setRowCount(0)
                 self.pay_debt_btn.setEnabled(False)
                 self.load_debt_customers()
+                
+                if hasattr(self, 'tab_dashboard'):
+                    self.load_dashboard_data()
             except Exception as e:
                 self.show_popup("Database Error", f"Failed to process payment: {e}", True)
 
-    # --- STORAGE LOGIC ---
     def load_inventory(self):
         if not self.current_storage_category:
             return 
-            
         self.inventory_table.setRowCount(0)
         try:
             conn = sqlite3.connect('store_database.db')
@@ -691,7 +878,6 @@ class MainWindow(QMainWindow):
                            (self.current_storage_category,))
             rows = cursor.fetchall()
             conn.close()
-            
             for row_data in rows:
                 row_pos = self.inventory_table.rowCount()
                 self.inventory_table.insertRow(row_pos)
@@ -722,7 +908,7 @@ class MainWindow(QMainWindow):
             cost = float(cost_text)
             sell = float(sell_text)
         except ValueError:
-            self.show_popup("Error", "Quantity must be a whole number.\nPrices must be standard numbers (e.g., 2.50).", True)
+            self.show_popup("Error", "Quantity must be a whole number.\nPrices must be standard numbers.", True)
             return
             
         try:
@@ -738,16 +924,17 @@ class MainWindow(QMainWindow):
             
             if self.storage_stack.currentIndex() == 1 and self.current_storage_category == category:
                 self.load_inventory()
+                
+            if hasattr(self, 'tab_dashboard'):
+                self.load_dashboard_data()
         except Exception as e:
             self.show_popup("Database Error", f"Failed to add product: {e}", True)
 
-    # --- CASH REGISTER LOGIC ---
     def add_item_to_cart(self):
         search_term = self.search_input.text().strip()
         qty_text = self.qty_input.text().strip()
         
         if not search_term: return
-            
         try:
             qty = int(qty_text) if qty_text else 1
             if qty <= 0: raise ValueError
@@ -766,7 +953,6 @@ class MainWindow(QMainWindow):
             if qty > stock:
                 self.show_popup("Stock Warning", f"You only have {stock} of '{name}' left in stock!", True)
                 return
-                
             subtotal = price * qty
             self.cart_data.append({'id': prod_id, 'name': name, 'qty': qty, 'price': price, 'subtotal': subtotal})
             
@@ -790,7 +976,6 @@ class MainWindow(QMainWindow):
 
     def complete_cash_sale(self):
         if not self.cart_data: return
-
         try:
             conn = sqlite3.connect('store_database.db')
             cursor = conn.cursor()
@@ -815,8 +1000,11 @@ class MainWindow(QMainWindow):
             if self.storage_stack.currentIndex() == 1:
                 self.load_inventory() 
                 
+            if hasattr(self, 'tab_dashboard'):
+                self.load_dashboard_data()
+                self.load_sales_history()
+                
             self.show_popup("Sale Complete", f"Success! Sale #{sale_id} logged.\nStock securely updated.")
-
         except Exception as e:
             pass
 
@@ -866,6 +1054,10 @@ class MainWindow(QMainWindow):
                 if self.storage_stack.currentIndex() == 1:
                     self.load_inventory()
                 
+                if hasattr(self, 'tab_dashboard'):
+                    self.load_dashboard_data()
+                    self.load_sales_history()
+                
                 self.show_popup("Debt Logged", f"Success! {self.cart_total:.2f} JOD added to {customer_name}'s tab.")
 
             except Exception as e:
@@ -883,3 +1075,36 @@ class MainWindow(QMainWindow):
         if is_error: msg.setIcon(QMessageBox.Icon.Warning)
         else: msg.setIcon(QMessageBox.Icon.Information)
         msg.exec()
+
+    # --- WINDOW DRAGGING & ANIMATION LOGIC ---
+    def toggle_maximize(self):
+        self.anim = QPropertyAnimation(self, b"geometry")
+        self.anim.setDuration(200) 
+        self.anim.setEasingCurve(QEasingCurve.Type.InOutQuart) 
+        self.anim.setStartValue(self.geometry())
+
+        if self.is_maximized_custom:
+            self.anim.setEndValue(self.normal_geometry)
+            self.is_maximized_custom = False
+            self.max_btn.setText("□")
+        else:
+            self.normal_geometry = self.geometry()
+            screen_geom = self.screen().availableGeometry()
+            self.anim.setEndValue(screen_geom)
+            self.is_maximized_custom = True
+            self.max_btn.setText("❐")
+
+        self.anim.start()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and event.position().y() < 45:
+            self.old_pos = event.globalPosition().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if self.old_pos is not None and not self.is_maximized_custom:
+            delta = event.globalPosition().toPoint() - self.old_pos
+            self.move(self.pos() + delta)
+            self.old_pos = event.globalPosition().toPoint()
+
+    def mouseReleaseEvent(self, event):
+        self.old_pos = None
