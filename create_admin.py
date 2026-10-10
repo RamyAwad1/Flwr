@@ -5,7 +5,7 @@ def create_admin():
     conn = sqlite3.connect('store_database.db')
     cursor = conn.cursor()
 
-    username = "Abu Laith"
+    username = "Ramy"
     password = "Secret.173" 
     
     # We scramble (hash) the password so it isn't saved as plain text
@@ -13,7 +13,7 @@ def create_admin():
 
     try:
         cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", 
-                       (username, hashed_password, "User"))
+                       (username, hashed_password, "Admin"))
         conn.commit()
         print(f"Success! User '{username}' created with password '{password}'.")
     except sqlite3.IntegrityError:
